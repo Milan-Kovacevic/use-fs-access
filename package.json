@@ -4,7 +4,9 @@
   "description": "A React hook that builds on top of the File System Access API to enable easy file and directory operations in modern browsers.",
   "main": "src/index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "vite build",
+    "clean": "rm -rf dist"
   },
   "repository": {
     "type": "git",
@@ -23,5 +25,19 @@
   "bugs": {
     "url": "https://github.com/Milan-Kovacevic/use-fs-access/issues"
   },
-  "homepage": "https://github.com/Milan-Kovacevic/use-fs-access#readme"
+  "homepage": "https://github.com/Milan-Kovacevic/use-fs-access#readme",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/wicg-file-system-access": "^2023.10.6",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.2"
+  },
+  "dependencies": {
+    "ignore": "^7.0.3"
+  }
 }
