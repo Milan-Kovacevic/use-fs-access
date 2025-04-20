@@ -2,11 +2,15 @@
   "name": "use-fs-access",
   "version": "1.0.0",
   "description": "A React hook that builds on top of the File System Access API to enable easy file and directory operations in modern browsers.",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "clean": "rm -rf dist"
+    "clean": "del-cli dist",
+    "build": "npm run clean && tsc -p ./tsconfig.json",
+    "prepack": "npm run build"
   },
   "repository": {
     "type": "git",
@@ -33,9 +37,9 @@
   "devDependencies": {
     "@types/react": "^19.1.2",
     "@types/wicg-file-system-access": "^2023.10.6",
-    "@vitejs/plugin-react": "^4.4.1",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.2"
+    "del-cli": "^6.0.0",
+    "semantic-release": "^24.2.3",
+    "typescript": "^5.8.3"
   },
   "dependencies": {
     "ignore": "^7.0.3"

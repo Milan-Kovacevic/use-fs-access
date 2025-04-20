@@ -1,3 +1,5 @@
+import { IDirectoryData, IDirectoryStore } from "src/core/types";
+
 export interface IndexedDBDirectoryStoreOptions {
   storeName?: string;
 }
@@ -12,7 +14,7 @@ const DEFAULT_DB_NAME = "default-db";
 const DEFAULT_STORE_NAME = "default-filehandles-store";
 const DEFAULT_DB_VERSION = 1;
 
-export const indexedDBDirectoryStore = <TData extends DirectoryData>(
+export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
   props?: IndexedDBDirectoryStoreProps
 ): IDirectoryStore<TData, IndexedDBDirectoryStoreOptions> => {
   const {
@@ -113,6 +115,6 @@ export const indexedDBDirectoryStore = <TData extends DirectoryData>(
 };
 
 export const defaultDirectoryStore: IDirectoryStore<
-  DirectoryData,
+  IDirectoryData,
   IndexedDBDirectoryStoreOptions
 > = indexedDBDirectoryStore();
