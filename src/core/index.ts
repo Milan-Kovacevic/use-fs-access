@@ -623,7 +623,7 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
     if (fileWatchRef.current || !rootHandleRef.current) return;
     let processingTask: Promise<void> | null = null;
 
-    fileWatchRef.current = setInterval(() => {
+    fileWatchRef.current = window.setInterval(() => {
       if (processingTask) return;
 
       processingTask = (async () => {
