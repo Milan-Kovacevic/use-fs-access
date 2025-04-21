@@ -1,7 +1,11 @@
-import { DirectoryInfo, FileInfo, FileTreeNode } from "./types";
+import { FileOrDirectoryInfo } from "src/core";
+
+export type FileTreeNode = FileOrDirectoryInfo & {
+  children: FileTreeNode[];
+};
 
 const buildFileTree = (
-  map: Map<string, FileInfo | DirectoryInfo>,
+  map: Map<string, FileOrDirectoryInfo>,
   sort: boolean = true
 ): FileTreeNode | null => {
   const pathToTreeNode = new Map<string, FileTreeNode>();
@@ -44,4 +48,3 @@ const sortFileTree = (dirNode: FileTreeNode) => {
 };
 
 export { buildFileTree };
-export type { FileTreeNode };

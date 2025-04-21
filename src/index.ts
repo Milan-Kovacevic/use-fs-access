@@ -1,2 +1,2 @@
-import useFileSystemAccess from "./core";
-export { useFileSystemAccess };
+import useFileSystemAccess from "./core/use-fs-access";
+export default useFileSystemAccess;

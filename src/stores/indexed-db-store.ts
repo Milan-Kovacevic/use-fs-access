@@ -1,10 +1,14 @@
-import { IDirectoryData, IDirectoryStore } from "src/core/types";
+import {
+  IDirectoryData,
+  IDirectoryStore,
+  IDirectoryStoreOptions,
+} from "src/core/types";
 
-export interface IndexedDBDirectoryStoreOptions {
+export interface IndexedDBDirectoryStoreOptions extends IDirectoryStoreOptions {
   storeName?: string;
 }
 
-export interface IndexedDBDirectoryStoreProps {
+interface IndexedDBDirectoryStoreProps {
   dbName?: string;
   storeName?: string;
   dbVersion?: number;

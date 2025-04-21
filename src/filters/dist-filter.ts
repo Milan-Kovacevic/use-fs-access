@@ -1,4 +1,4 @@
-import { FileFilterFn } from "src/core/types";
+import { FileFilterFn } from "src/core";
 
 export const distFilter: FileFilterFn = async () => {
   const isDist = (filePath: string) => {

@@ -2,11 +2,6 @@
   "name": "use-fs-access",
   "version": "1.0.0",
   "description": "A React hook that builds on top of the File System Access API to enable easy file and directory operations in modern browsers.",
-  "main": "dist/index.js",
-  "types": "dist/types/index.d.ts",
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "clean": "del-cli dist",
     "build": "npm run clean && tsc -p ./tsconfig.json",
@@ -31,6 +26,37 @@
     "url": "https://github.com/Milan-Kovacevic/use-fs-access/issues"
   },
   "homepage": "https://github.com/Milan-Kovacevic/use-fs-access#readme",
+  "main": "./dist/index.js",
+  "files": [
+    "dist/"
+  ],
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "types": "./dist/types/index.d.ts"
+    },
+    "./core": {
+      "require": "./dist/core/index.js",
+      "import": "./dist/core/index.js",
+      "types": "./dist/types/core/index.d.ts"
+    },
+    "./extensions": {
+      "require": "./dist/extensions/index.js",
+      "import": "./dist/extensions/index.js",
+      "types": "./dist/types/extensions/index.d.ts"
+    },
+    "./filters": {
+      "require": "./dist/filters/index.js",
+      "import": "./dist/filters/index.js",
+      "types": "./dist/types/filters/index.d.ts"
+    },
+    "./stores": {
+      "require": "./dist/stores/index.js",
+      "import": "./dist/stores/index.js",
+      "types": "./dist/types/stores/index.d.ts"
+    }
+  },
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"

@@ -47,11 +47,7 @@ interface IDirectoryStore<
   removeDirectory: (key: string, options?: TOptions) => Promise<void>;
 }
 
-type FileTreeNode = FileOrDirectoryInfo & {
-  children: FileTreeNode[];
-};
-
-export type {
+export {
   FileOrDirectoryInfo,
   FileInfo,
   DirectoryInfo,
@@ -60,5 +56,4 @@ export type {
   IDirectoryData,
   IDirectoryStoreOptions,
   IDirectoryStore,
-  FileTreeNode,
 };

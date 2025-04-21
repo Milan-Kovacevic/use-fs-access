@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { useFileSystemAccess } from "../src";
+import useFileSystemAccess from "../src";
 
 describe("useFileSystemAccess - isSupported", () => {
   const originalShowDirectoryPicker = window.showDirectoryPicker;

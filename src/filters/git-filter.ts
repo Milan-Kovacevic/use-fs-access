@@ -1,5 +1,5 @@
 import ignore from "ignore";
-import { FileFilterFn } from "src/core/types";
+import { FileFilterFn } from "src/core";
 
 export const gitIgnoreFilter: FileFilterFn = async () => {
   const ig = ignore({
