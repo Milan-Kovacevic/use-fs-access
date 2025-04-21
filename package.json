@@ -1,16 +1,17 @@
 {
   "name": "use-fs-access",
-  "version": "1.0.0",
+  "version": "0.0.0-development",
   "description": "A React hook that builds on top of the File System Access API to enable easy file and directory operations in modern browsers.",
   "scripts": {
     "clean": "del-cli dist",
     "build": "npm run clean && tsc -p ./tsconfig.json",
     "prepack": "npm run build",
-    "test": "jest"
+    "test": "jest",
+    "semantic-release": "semantic-release"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Milan-Kovacevic/use-fs-access.git"
+    "url": "https://github.com/Milan-Kovacevic/use-fs-access.git"
   },
   "keywords": [
     "react",
@@ -26,6 +27,14 @@
     "url": "https://github.com/Milan-Kovacevic/use-fs-access/issues"
   },
   "homepage": "https://github.com/Milan-Kovacevic/use-fs-access#readme",
+  "release": {
+    "branches": [
+      "main"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "files": [
     "dist/"
