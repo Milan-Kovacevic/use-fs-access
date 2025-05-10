@@ -1,3 +1,5 @@
+type FileSystemFiles = Map<string, FileOrDirectoryInfo>;
+
 type FileOrDirectoryInfo = FileInfo | DirectoryInfo;
 
 type FileInfo = {
@@ -31,29 +33,11 @@ type FileFilterFn = {
   (): Promise<IFileFilter>;
 };
 
-interface IDirectoryData extends FileSystemDirectoryHandle {}
-interface IDirectoryStoreOptions {}
-interface IDirectoryStore<
-  TData extends IDirectoryData,
-  TOptions extends IDirectoryStoreOptions
-> {
-  getDirectories: (options?: TOptions) => Promise<Map<string, TData>>;
-  saveDirectory: (
-    key?: string,
-    value?: TData,
-    options?: TOptions
-  ) => Promise<void>;
-  clearDirectories: (options?: TOptions) => Promise<void>;
-  removeDirectory: (key: string, options?: TOptions) => Promise<void>;
-}
-
 export {
+  FileSystemFiles,
   FileOrDirectoryInfo,
   FileInfo,
   DirectoryInfo,
   IFileFilter,
   FileFilterFn,
-  IDirectoryData,
-  IDirectoryStoreOptions,
-  IDirectoryStore,
 };

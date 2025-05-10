@@ -50,11 +50,6 @@
       "import": "./dist/core/index.js",
       "types": "./dist/types/core/index.d.ts"
     },
-    "./extensions": {
-      "require": "./dist/extensions/index.js",
-      "import": "./dist/extensions/index.js",
-      "types": "./dist/types/extensions/index.d.ts"
-    },
     "./filters": {
       "require": "./dist/filters/index.js",
       "import": "./dist/filters/index.js",

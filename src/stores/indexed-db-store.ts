@@ -1,14 +1,26 @@
-import {
-  IDirectoryData,
-  IDirectoryStore,
-  IDirectoryStoreOptions,
-} from "src/core/types";
+type IDirectoryData = {
+  handle: FileSystemDirectoryHandle;
+};
+type IDirectoryStoreOptions = {};
+interface IDirectoryStore<
+  TData extends IDirectoryData,
+  TOptions extends IDirectoryStoreOptions
+> {
+  getDirectories: (options?: TOptions) => Promise<Map<string, TData>>;
+  saveDirectory: (
+    key?: string,
+    value?: TData,
+    options?: TOptions
+  ) => Promise<void>;
+  clearDirectories: (options?: TOptions) => Promise<void>;
+  removeDirectory: (key: string, options?: TOptions) => Promise<void>;
+}
 
-export interface IndexedDBDirectoryStoreOptions extends IDirectoryStoreOptions {
+export interface DirectoryStoreOptions extends IDirectoryStoreOptions {
   storeName?: string;
 }
 
-interface IndexedDBDirectoryStoreProps {
+interface DirectoryStoreProps {
   dbName?: string;
   storeName?: string;
   dbVersion?: number;
@@ -18,9 +30,12 @@ const DEFAULT_DB_NAME = "default-db";
 const DEFAULT_STORE_NAME = "default-filehandles-store";
 const DEFAULT_DB_VERSION = 1;
 
-export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
-  props?: IndexedDBDirectoryStoreProps
-): IDirectoryStore<TData, IndexedDBDirectoryStoreOptions> => {
+export const indexedDBDirectoryStore = <
+  TData extends IDirectoryData,
+  TOptions extends DirectoryStoreOptions
+>(
+  props?: DirectoryStoreProps
+): IDirectoryStore<TData, TOptions> => {
   const {
     dbName = DEFAULT_DB_NAME,
     dbVersion = DEFAULT_DB_VERSION,
@@ -46,7 +61,7 @@ export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
   async function saveDirectory(
     key?: string,
     value?: TData,
-    options?: IndexedDBDirectoryStoreOptions
+    options?: TOptions
   ): Promise<void> {
     if (!value || !key) return;
     const { storeName = dbStoreName } = options || {};
@@ -59,7 +74,7 @@ export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
   }
 
   async function getDirectories(
-    options?: IndexedDBDirectoryStoreOptions
+    options?: TOptions
   ): Promise<Map<string, TData>> {
     const { storeName = dbStoreName } = options || {};
     const db = await openDB(storeName);
@@ -85,9 +100,7 @@ export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
     });
   }
 
-  async function clearDirectories(
-    options?: IndexedDBDirectoryStoreOptions
-  ): Promise<void> {
+  async function clearDirectories(options?: TOptions): Promise<void> {
     const { storeName = dbStoreName } = options || {};
 
     const db = await openDB(storeName);
@@ -99,7 +112,7 @@ export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
 
   async function removeDirectory(
     key: string,
-    options?: IndexedDBDirectoryStoreOptions
+    options?: TOptions
   ): Promise<void> {
     const { storeName = dbStoreName } = options || {};
 
@@ -117,8 +130,3 @@ export const indexedDBDirectoryStore = <TData extends IDirectoryData>(
     removeDirectory,
   };
 };
-
-export const defaultDirectoryStore: IDirectoryStore<
-  IDirectoryData,
-  IndexedDBDirectoryStoreOptions
-> = indexedDBDirectoryStore();

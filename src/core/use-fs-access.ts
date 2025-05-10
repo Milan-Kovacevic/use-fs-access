@@ -1,32 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { defaultFilters } from "../filters";
-import { defaultDirectoryStore } from "../stores";
 import {
   DirectoryInfo,
   FileFilterFn,
   FileInfo,
-  FileOrDirectoryInfo,
-  IDirectoryData,
-  IDirectoryStore,
-  IDirectoryStoreOptions,
+  FileSystemFiles,
   IFileFilter,
 } from "./types";
 
 interface FileSystemAccessProps {
   filters?: FileFilterFn[];
-  store?: IDirectoryStore<IDirectoryData, IDirectoryStoreOptions>;
   enableFileWatcher?: boolean;
   fileWatcherOptions?: FileWatcherOptions;
 
-  onFilesAdded?: (newEntries: Map<string, FileOrDirectoryInfo>) => void;
-  onFilesDeleted?: (deletedEntries: Map<string, FileOrDirectoryInfo>) => void;
+  onFilesAdded?: (newEntries: FileSystemFiles) => void;
+  onFilesDeleted?: (deletedEntries: FileSystemFiles) => void;
   onFilesModified?: (modifiedFiles: Map<string, FileInfo>) => void;
 }
 
-export interface OpenDirectoryOptions extends DirectoryPickerOptions {
-  save?: boolean;
-  saveOptions?: IDirectoryStoreOptions;
-  directory?: FileSystemDirectoryHandle;
+export interface FileSystemAccessApi {
+  files: FileSystemFiles;
+  openDirectory: (
+    directory: FileSystemDirectoryHandle,
+    depth?: number
+  ) => Promise<FileSystemFiles | undefined>;
+  expandDirectory: (path: string) => Promise<FileSystemFiles | undefined>;
+  openFile: (path: string) => Promise<FileInfo>;
+  closeFile: (path: string) => Promise<FileInfo>;
+  writeFile: (
+    path: string,
+    options?: WriteFileOptions,
+    data?: string | Blob | ArrayBuffer
+  ) => Promise<FileInfo>;
+  createDirectory: (name: string, parentPath: string) => Promise<DirectoryInfo>;
+  deleteFile: (path: string) => Promise<void>;
+  deleteDirectory: (path: string, recursive?: boolean) => Promise<void>;
 }
 
 export interface WriteFileOptions {
@@ -43,15 +51,39 @@ export interface FileWatcherOptions {
 }
 
 const DEFAULT_OPEN_DIRECTORY_MODE = "readwrite";
-const DEFAULT_DIRECTORY_STORE = defaultDirectoryStore;
 const DEFAULT_FILTERS = defaultFilters;
 const DEFAULT_POLL_INTERVAL = 1_000;
 const DEFAULT_CACHE_TIME = 10_000;
 const DEFAULT_BATCH_SIZE = 50;
+const DEFAULT_LOAD_DEPTH = 2;
 
-export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
+export const isApiSupported =
+  window !== undefined && "showDirectoryPicker" in window;
+
+export const showDirectoryPicker = async (
+  options: DirectoryPickerOptions = {}
+): Promise<FileSystemDirectoryHandle | undefined> => {
+  if (!isApiSupported) return;
+
+  const { mode = DEFAULT_OPEN_DIRECTORY_MODE } = options;
+  try {
+    return await window.showDirectoryPicker({ ...options, mode });
+  } catch (err) {
+    console.warn("Unable to open directory:", err);
+  }
+};
+
+export const requestDirectoryPermission = async (
+  handle: FileSystemDirectoryHandle,
+  mode: FileSystemPermissionMode = DEFAULT_OPEN_DIRECTORY_MODE
+) => {
+  return (await handle.requestPermission({ mode: mode })) === "granted";
+};
+
+export default function useFileSystemAccess(
+  props: FileSystemAccessProps = {}
+): FileSystemAccessApi {
   const {
-    store = DEFAULT_DIRECTORY_STORE,
     filters: filterFns = props?.filters ?? DEFAULT_FILTERS,
     onFilesAdded: onAddFiles,
     onFilesDeleted: onDeleteFiles,
@@ -64,22 +96,16 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
     props.fileWatcherOptions?.pollInterval ?? DEFAULT_POLL_INTERVAL;
   const debugFileWatcher = props.fileWatcherOptions?.debug ?? true;
 
-  const isSupported = window !== undefined && "showDirectoryPicker" in window;
-
   const rootHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const filtersRef = useRef<IFileFilter[]>([]);
   const ignoredPathsRef = useRef<Set<string>>(new Set());
-  const filesRef = useRef<Map<string, FileOrDirectoryInfo>>(new Map());
-  const previousFilesRef = useRef<Map<string, FileOrDirectoryInfo>>(new Map());
+  const filesRef = useRef<FileSystemFiles>(new Map());
+  const previousFilesRef = useRef<FileSystemFiles>(new Map());
 
   const fileWatchRef = useRef<number | null>(null);
   const watchedDirectoriesRef = useRef<Map<string, DirectoryNode>>(new Map());
   const fileCacheRef = useRef<Map<string, FileCacheEntry>>(new Map());
-
-  const [pending, setPending] = useState(false);
-  const [files, setFiles] = useState<Map<string, FileOrDirectoryInfo>>(
-    new Map()
-  );
+  const [files, setFiles] = useState<FileSystemFiles>(new Map());
 
   const memoFiltersRef = useRef<IFileFilter[]>([]);
   const memoIgnoredPathsRef = useRef<Set<string>>(new Set());
@@ -112,45 +138,35 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
     fileCacheRef.current.clear();
   };
 
-  const openDirectory = async (options: OpenDirectoryOptions = {}) => {
-    if (!isSupported) return;
+  const openDirectory = async (
+    directory: FileSystemDirectoryHandle,
+    depth: number = DEFAULT_LOAD_DEPTH
+  ): Promise<FileSystemFiles | undefined> => {
+    if (!isApiSupported) return;
 
-    const {
-      mode = DEFAULT_OPEN_DIRECTORY_MODE,
-      saveOptions,
-      save = true,
-      directory,
-    } = options;
+    if ((await directory.requestPermission({ mode: "read" })) == "denied")
+      return;
 
     try {
-      setPending(true);
-      const dirHandle =
-        directory ?? (await window.showDirectoryPicker({ ...options, mode }));
-
-      const state = await dirHandle.requestPermission({ mode: mode });
-      if (state == "denied") return;
-
       clearOpenedDirectory();
-      rootHandleRef.current = dirHandle;
-      const rootPath = dirHandle.name;
+      rootHandleRef.current = directory;
+      const rootPath = directory.name;
 
       if (enableFileWatcher) await registerFileWatcher();
       await initFileFilters();
-      await expandFileTree(dirHandle, rootPath, 2);
-      if (save) {
-        await store.saveDirectory(dirHandle.name, dirHandle, saveOptions);
-      }
+      return await expandFileTree(directory, rootPath, depth);
     } catch (err) {
       console.warn("Directory opening failed:", err);
-    } finally {
-      setPending(false);
     }
   };
 
-  const expandDirectory = async (path: string): Promise<void> => {
+  const expandDirectory = async (
+    path: string
+  ): Promise<FileSystemFiles | undefined> => {
     const dirInfo = filesRef.current.get(path);
-    if (dirInfo && dirInfo.kind == "directory" && !dirInfo.loaded)
-      await expandFileTree(dirInfo.handle, path);
+    if (dirInfo && dirInfo.kind == "directory" && !dirInfo.loaded) {
+      return await expandFileTree(dirInfo.handle, path);
+    }
   };
 
   const openFile = async (path: string): Promise<FileInfo> => {
@@ -165,25 +181,6 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
       throw new Error(`Invalid file path: ${path}`);
 
     return await toggleFileOpened(path, false);
-  };
-
-  const getSavedDirectories = async (
-    providerOptions?: IDirectoryStoreOptions
-  ): Promise<Map<string, FileSystemDirectoryHandle>> => {
-    return await store.getDirectories(providerOptions);
-  };
-
-  const clearSavedDirectories = async (
-    providerOptions?: IDirectoryStoreOptions
-  ) => {
-    await store.clearDirectories(providerOptions);
-  };
-
-  const removeSavedDirectory = async (
-    directoryName: string,
-    providerOptions?: IDirectoryStoreOptions
-  ) => {
-    await store.removeDirectory(directoryName, providerOptions);
   };
 
   const writeFile = async (
@@ -404,7 +401,7 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
     dirHandle: FileSystemDirectoryHandle,
     basePath: string,
     depth: number = 1
-  ): Promise<void> => {
+  ): Promise<FileSystemFiles> => {
     try {
       await loadDirectories(dirHandle, basePath, depth);
       await loadDirectoryNodes(dirHandle, basePath, depth);
@@ -424,8 +421,10 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
 
       previousFilesRef.current = filesRef.current;
       setFiles(new Map(filesRef.current));
+      return filesRef.current;
     } catch (err) {
       console.warn("Directory processing failed:", err);
+      return new Map();
     }
   };
 
@@ -656,7 +655,7 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
       node: VirtualFileEntry,
       files: Map<string, FileInfo | DirectoryInfo>,
       timestamp: number,
-      addedEntries: Map<string, FileOrDirectoryInfo>,
+      addedEntries: FileSystemFiles,
       modifiedEntries: Map<string, FileInfo>
     ) => {
       const prevEntry = previousFilesRef.current.get(path);
@@ -738,8 +737,8 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
 
   const processFilteredEntries = useCallback(
     async (fileEntries: Map<string, VirtualFileEntry>) => {
-      const addedEntries: Map<string, FileOrDirectoryInfo> = new Map();
-      const deletedEntries: Map<string, FileOrDirectoryInfo> = new Map();
+      const addedEntries: FileSystemFiles = new Map();
+      const deletedEntries: FileSystemFiles = new Map();
       const modifiedEntries: Map<string, FileInfo> = new Map();
       const timestamp = Date.now();
       const seenEntries = new Set<string>();
@@ -952,9 +951,7 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
   const debouncedFiles = useDebounce(files, 50);
 
   return {
-    isSupported,
     files: debouncedFiles,
-    pending,
     openDirectory,
     expandDirectory,
     openFile,
@@ -963,11 +960,6 @@ export default function useFileSystemAccess(props: FileSystemAccessProps = {}) {
     createDirectory,
     deleteFile,
     deleteDirectory,
-    directoryAccessor: {
-      getSavedDirectories,
-      clearSavedDirectories,
-      removeSavedDirectory,
-    },
   };
 }
 
