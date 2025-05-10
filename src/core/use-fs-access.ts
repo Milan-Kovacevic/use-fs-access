@@ -725,8 +725,7 @@ export default function useFileSystemAccess(
 
       if (isNew) addedEntries.set(path, fileInfo);
 
-      // Check for content modifications only if file is opened
-      if (isModified && isOpened) {
+      if (isModified) {
         modifiedEntries.set(path, fileInfo);
       }
 
