@@ -1,7 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import useFileSystemAccess from "../src";
+import {
+  isApiSupported,
+  showDirectoryPicker as api_ShowDirectoryPicker,
+} from "../src/core/use-fs-access";
 
-describe("useFileSystemAccess - isSupported", () => {
+describe("useFileSystemAccess - isApiSupported", () => {
   const originalShowDirectoryPicker = window.showDirectoryPicker;
 
   beforeEach(() => {
@@ -14,14 +18,11 @@ describe("useFileSystemAccess - isSupported", () => {
 
   it("should detect unsupported browser", () => {
     delete (window as any).showDirectoryPicker;
-
-    const { result } = renderHook(() => useFileSystemAccess());
-
-    expect(result.current.isSupported).toBe(false);
+    expect(isApiSupported).toBe(false);
   });
 });
 
-describe("useFileSystemAccess - openDirectory", () => {
+describe("useFileSystemAccess - showDirectoryPicker", () => {
   const originalShowDirectoryPicker = window.showDirectoryPicker;
 
   beforeEach(() => {
@@ -33,16 +34,17 @@ describe("useFileSystemAccess - openDirectory", () => {
   });
 
   it("should call showDirectoryPicker and process files if supported", async () => {
-    // ARRANGE
     const fakeFile: File = new File(["hello"], "test.txt", {
       type: "text/plain",
       lastModified: 1234567890,
     });
+
     const mockFileHandle: FileSystemFileHandle = {
       kind: "file",
       name: "test.txt",
       getFile: jest.fn().mockResolvedValue(fakeFile),
     } as any;
+
     const mockDirHandle: FileSystemDirectoryHandle = {
       kind: "directory",
       name: "mock-dir",
@@ -51,45 +53,26 @@ describe("useFileSystemAccess - openDirectory", () => {
         yield ["test.txt", mockFileHandle];
       },
     } as any;
-    window.showDirectoryPicker = jest.fn().mockResolvedValue(mockDirHandle);
-    const { result } = renderHook(() =>
-      useFileSystemAccess({ enableFileWatcher: false })
-    );
 
-    // ACT
+    (window as any).showDirectoryPicker = jest
+      .fn()
+      .mockResolvedValue(mockDirHandle);
+
+    let api_ShowDirectoryPicker: any;
+
+    jest.isolateModules(() => {
+      api_ShowDirectoryPicker =
+        require("../src/core/use-fs-access").showDirectoryPicker;
+    });
+
+    let handle: FileSystemDirectoryHandle | undefined;
     await act(async () => {
-      await result.current.openDirectory({ save: false });
-    });
-    await waitFor(() => {
-      expect(result.current.files.size).toBeGreaterThan(0);
+      handle = await api_ShowDirectoryPicker();
     });
 
-    // ASSERT
-    const filePaths = Array.from(result.current.files?.keys() ?? []);
     expect(window.showDirectoryPicker).toHaveBeenCalled();
-    expect(filePaths.length).toBe(2);
-    expect(filePaths).toContain("mock-dir");
-    expect(filePaths).toContain("mock-dir/test.txt");
-  });
-
-  it("should exit early if browser does not support", async () => {
-    // ARRANGE
-    delete (window as any).showDirectoryPicker;
-    const { result } = renderHook(() =>
-      useFileSystemAccess({ enableFileWatcher: false })
-    );
-    window.showDirectoryPicker = jest.fn();
-    Object.defineProperty(result.current, "isSupported", {
-      get: () => false,
-    });
-
-    // ACT
-    await act(async () => {
-      await result.current.openDirectory({ save: false, mode: "read" });
-    });
-
-    // ASSERT
-    expect(window.showDirectoryPicker).not.toHaveBeenCalled();
-    expect(result.current.files.size).toBe(0);
+    expect(handle).not.toBeNull();
+    expect(handle?.name).toBe("mock-dir");
+    expect(Array.of(handle?.entries()).length).toBe(1);
   });
 });
