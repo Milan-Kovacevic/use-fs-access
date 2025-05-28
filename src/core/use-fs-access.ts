@@ -98,6 +98,7 @@ export default function useFileSystemAccess(
     props.fileWatcherOptions?.pollInterval ?? DEFAULT_POLL_INTERVAL;
   const debugFileWatcher = props.fileWatcherOptions?.debug ?? true;
 
+  const pauseFileWatcherRef = useRef<boolean>(false);
   const rootHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
   const filtersRef = useRef<IFileFilter[]>([]);
   const ignoredPathsRef = useRef<Set<string>>(new Set());
@@ -323,6 +324,7 @@ export default function useFileSystemAccess(
       throw new Error(`File not found: ${path}`);
     }
 
+    pauseFileWatcherRef.current = true;
     try {
       const parentDirInfo = ensureGetParentDirInfo(path);
       await parentDirInfo.handle.removeEntry(fileInfo.name);
@@ -333,8 +335,9 @@ export default function useFileSystemAccess(
 
       setFiles(new Map(filesRef.current));
     } catch (err) {
-      console.error(err);
       throw new Error(`Unable to delete file: ${path}`);
+    } finally {
+      pauseFileWatcherRef.current = false;
     }
   };
 
@@ -350,6 +353,7 @@ export default function useFileSystemAccess(
     if (isRootFilePath(path))
       throw new Error(`Root directory can't be deleted: ${path}`);
 
+    pauseFileWatcherRef.current = true;
     try {
       const parentDirInfo = ensureGetParentDirInfo(path);
       parentDirInfo.handle.removeEntry(dirInfo.name, { recursive: recursive });
@@ -365,8 +369,9 @@ export default function useFileSystemAccess(
 
       setFiles(new Map(filesRef.current));
     } catch (err) {
-      console.error(err);
       throw new Error(`Unable to delete directory: ${path}`);
+    } finally {
+      pauseFileWatcherRef.current = false;
     }
   };
 
@@ -388,6 +393,7 @@ export default function useFileSystemAccess(
     if (filesRef.current.has(newPath))
       throw new Error(`File with this name already exists: ${newName}`);
 
+    pauseFileWatcherRef.current = true;
     try {
       const file = await oldFileInfo.handle.getFile();
       const content = await file.text();
@@ -423,6 +429,8 @@ export default function useFileSystemAccess(
       return newFileInfo;
     } catch {
       throw new Error(`Unable to rename file: ${path}`);
+    } finally {
+      pauseFileWatcherRef.current = false;
     }
   };
 
@@ -445,26 +453,20 @@ export default function useFileSystemAccess(
       throw new Error(`Directory with this name already exists: ${newName}`);
 
     const parentHandle = parentDirInfo.handle;
+    pauseFileWatcherRef.current = true;
     try {
       const newDirHandle = await parentHandle.getDirectoryHandle(newName, {
         create: true,
       });
 
       filesRef.current.delete(oldDirInfo.path);
-      previousFilesRef.current.delete(oldDirInfo.path);
+      if (oldDirInfo.loaded)
+        watchedDirectoriesRef.current.delete(oldDirInfo.path);
 
       const newFilesMap: FileSystemFiles = new Map(filesRef.current);
-      await updateDirectoryContents(
-        oldDirInfo.handle,
-        newDirHandle,
-        newFilesMap,
-        oldDirInfo.path,
-        newPath
+      const newWatchedDirectories: Map<string, DirectoryNode> = new Map(
+        watchedDirectoriesRef.current
       );
-
-      await parentHandle.removeEntry(oldDirInfo.name, {
-        recursive: true,
-      });
 
       const newDirInfo: DirectoryInfo = {
         handle: newDirHandle,
@@ -473,14 +475,36 @@ export default function useFileSystemAccess(
         kind: "directory",
         loaded: oldDirInfo.loaded,
       };
+
       newFilesMap.set(newDirInfo.path, newDirInfo);
-      previousFilesRef.current.set(newDirInfo.path, newDirInfo);
+      if (newDirInfo.loaded)
+        newWatchedDirectories.set(newDirInfo.path, { handle: newDirHandle });
+
+      await updateDirectoryContents(
+        oldDirInfo.handle,
+        newDirHandle,
+        newFilesMap,
+        newWatchedDirectories,
+        oldDirInfo.path,
+        newPath
+      );
+
+      await parentHandle.removeEntry(oldDirInfo.name, {
+        recursive: true,
+      });
 
       filesRef.current = new Map(newFilesMap);
+      previousFilesRef.current = new Map(newFilesMap);
+      watchedDirectoriesRef.current = new Map(newWatchedDirectories);
       setFiles(new Map(filesRef.current));
       return newDirInfo;
     } catch {
+      await parentHandle.removeEntry(newName, {
+        recursive: true,
+      });
       throw new Error(`Unable to rename directory: ${path}`);
+    } finally {
+      pauseFileWatcherRef.current = false;
     }
   };
 
@@ -676,6 +700,7 @@ export default function useFileSystemAccess(
     src: FileSystemDirectoryHandle,
     dest: FileSystemDirectoryHandle,
     filesMap: FileSystemFiles,
+    watchedDirectories: Map<string, DirectoryNode>,
     oldBasePath: string,
     newBasePath: string
   ): Promise<void> => {
@@ -707,9 +732,8 @@ export default function useFileSystemAccess(
         };
 
         filesMap.delete(oldPath);
-        previousFilesRef.current.delete(oldPath);
+        fileCacheRef.current.delete(oldPath);
         filesMap.set(newPath, newFileInfo);
-        previousFilesRef.current.set(newPath, newFileInfo);
       } else if (handle.kind === "directory") {
         const newDirHandle = await dest.getDirectoryHandle(name, {
           create: true,
@@ -726,15 +750,11 @@ export default function useFileSystemAccess(
           };
 
           filesMap.delete(oldPath);
-          previousFilesRef.current.delete(oldPath);
           filesMap.set(newPath, newDirInfo);
-          previousFilesRef.current.set(newPath, newDirInfo);
 
           if (oldDirInfo.loaded) {
-            watchedDirectoriesRef.current.delete(oldDirInfo.path);
-            watchedDirectoriesRef.current.set(newPath, {
-              handle: newDirHandle,
-            });
+            watchedDirectories.delete(oldDirInfo.path);
+            watchedDirectories.set(newPath, { handle: newDirHandle });
           }
         }
 
@@ -742,6 +762,7 @@ export default function useFileSystemAccess(
           handle,
           newDirHandle,
           filesMap,
+          watchedDirectories,
           oldPath,
           newPath
         );
@@ -774,12 +795,14 @@ export default function useFileSystemAccess(
     let processingTask: Promise<void> | null = null;
 
     fileWatchRef.current = window.setInterval(() => {
-      if (processingTask) return;
+      if (processingTask || pauseFileWatcherRef.current == true) return;
 
       processingTask = (async () => {
         try {
           const entries = await filterWatchedDirectories();
           await processFilteredEntries(entries);
+        } catch (err) {
+          if (debugFileWatcher) console.log("DEBUG(ERROR)", err);
         } finally {
           processingTask = null;
         }
@@ -876,7 +899,7 @@ export default function useFileSystemAccess(
 
       if (isNew) addedEntries.set(path, fileInfo);
 
-      if (isModified) {
+      if (prevFile != null && isModified) {
         modifiedEntries.set(path, fileInfo);
       }
 
@@ -994,6 +1017,7 @@ export default function useFileSystemAccess(
         }
       } catch (err) {
         console.warn(`Error reading directory ${dirPath}:`, err);
+        return;
       }
 
       if (fileHandles.length > 1000) {
@@ -1057,7 +1081,6 @@ export default function useFileSystemAccess(
       filters.push(await filterFn());
     }
 
-    const dirTasks: Promise<void>[] = [];
     for (const [dirPath, dirNode] of watchedDirectoriesRef.current.entries()) {
       await filterDirectory(
         dirPath,
@@ -1067,7 +1090,6 @@ export default function useFileSystemAccess(
         ignoredEntries
       );
     }
-    await Promise.all(dirTasks);
 
     // Ignore the remaining files that weren't affected by the filters
     const filterTasks: Promise<void>[] = [];
