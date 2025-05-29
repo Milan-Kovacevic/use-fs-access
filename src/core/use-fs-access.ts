@@ -33,10 +33,14 @@ export interface FileSystemAccessApi {
     data?: string | Blob | ArrayBuffer
   ) => Promise<FileInfo>;
   createDirectory: (name: string, parentPath: string) => Promise<DirectoryInfo>;
-  deleteFile: (path: string) => Promise<void>;
-  deleteDirectory: (path: string, recursive?: boolean) => Promise<void>;
+  deleteFile: (path: string, recursive?: boolean) => Promise<void>;
   renameFile: (path: string, newName: string) => Promise<FileInfo>;
   renameDirectory: (path: string, newName: string) => Promise<DirectoryInfo>;
+  copyFile: (
+    path: string,
+    destination: string,
+    replace?: boolean
+  ) => Promise<void>;
 }
 
 export interface WriteFileOptions {
@@ -314,62 +318,39 @@ export default function useFileSystemAccess(
     }
   };
 
-  const deleteFile = async (path: string) => {
+  const deleteFile = async (path: string, recursive: boolean = false) => {
     if (!path || typeof path !== "string") {
-      throw new Error(`Invalid file path: ${path}`);
+      throw new Error(`Invalid path: ${path}`);
     }
 
-    const fileInfo = filesRef.current.get(path);
-    if (!fileInfo || fileInfo.kind !== "file") {
-      throw new Error(`File not found: ${path}`);
-    }
-
-    pauseFileWatcherRef.current = true;
-    try {
-      const parentDirInfo = ensureGetParentDirInfo(path);
-      await parentDirInfo.handle.removeEntry(fileInfo.name);
-
-      filesRef.current.delete(fileInfo.path);
-      previousFilesRef.current.delete(fileInfo.path);
-      if (fileInfo.opened) fileCacheRef.current.delete(fileInfo.path);
-
-      setFiles(new Map(filesRef.current));
-    } catch (err) {
-      throw new Error(`Unable to delete file: ${path}`);
-    } finally {
-      pauseFileWatcherRef.current = false;
-    }
-  };
-
-  // Delete a directory (recursive by default)
-  const deleteDirectory = async (path: string, recursive: boolean = true) => {
-    if (!path || typeof path !== "string")
-      throw new Error(`Invalid file path: ${path}`);
-
-    const dirInfo = filesRef.current.get(path);
-    if (!dirInfo || dirInfo.kind !== "directory")
-      throw new Error(`Directory not found: ${path}`);
-
+    const entryInfo = filesRef.current.get(path);
+    if (!entryInfo) throw new Error(`File or directory not found: ${path}`);
     if (isRootFilePath(path))
       throw new Error(`Root directory can't be deleted: ${path}`);
 
+    const isRecursive = entryInfo.kind === "directory" && recursive;
+
     pauseFileWatcherRef.current = true;
     try {
       const parentDirInfo = ensureGetParentDirInfo(path);
-      parentDirInfo.handle.removeEntry(dirInfo.name, { recursive: recursive });
+      await parentDirInfo.handle.removeEntry(entryInfo.name, {
+        recursive: isRecursive,
+      });
 
-      if (dirInfo.loaded) watchedDirectoriesRef.current.delete(dirInfo.path);
-      filesRef.current.delete(dirInfo.path);
-      previousFilesRef.current.delete(dirInfo.path);
+      filesRef.current.delete(entryInfo.path);
+      previousFilesRef.current.delete(entryInfo.path);
 
-      if (recursive) {
-        // Delete all subdirectories
-        await deleteSubDirectories(path);
-      }
+      if (entryInfo.kind === "file" && entryInfo.opened)
+        fileCacheRef.current.delete(entryInfo.path);
+
+      if (entryInfo.kind === "directory" && entryInfo.loaded)
+        watchedDirectoriesRef.current.delete(entryInfo.path);
+
+      if (isRecursive) await deleteSubDirectories(path);
 
       setFiles(new Map(filesRef.current));
-    } catch (err) {
-      throw new Error(`Unable to delete directory: ${path}`);
+    } catch {
+      throw new Error(`Unable to delete ${entryInfo.kind}: ${path}`);
     } finally {
       pauseFileWatcherRef.current = false;
     }
@@ -506,6 +487,159 @@ export default function useFileSystemAccess(
     } finally {
       pauseFileWatcherRef.current = false;
     }
+  };
+
+  const copyFile = async (
+    path: string,
+    destination: string,
+    replace: boolean = false
+  ): Promise<void> => {
+    if (!path || !path.includes("/")) throw new Error(`Invalid path: ${path}`);
+
+    if (destination.startsWith(path))
+      throw new Error(
+        `Destination directory is the subdirectory of the source: ${path}`
+      );
+
+    const destDirInfo = filesRef.current.get(destination);
+    if (!destDirInfo || destDirInfo.kind !== "directory")
+      throw new Error(`Destination directory not found: ${path}`);
+
+    const oldEntryInfo = filesRef.current.get(path);
+    if (!oldEntryInfo)
+      throw new Error(`Source file or directory not found: ${path}`);
+
+    const fileName = oldEntryInfo.name;
+    const newPath = `${destDirInfo.path}/${fileName}`;
+    if (filesRef.current.has(newPath))
+      throw new Error(
+        `File or directory with this name already exists in the destination directory!`
+      );
+
+    const destHandle = destDirInfo.handle;
+    const isDirectory = oldEntryInfo.kind === "directory";
+    const parentDirInfo = ensureGetParentDirInfo(path);
+    pauseFileWatcherRef.current = true;
+    try {
+      // File entry
+      if (!isDirectory) {
+        return await doCopyFile(
+          oldEntryInfo,
+          destHandle,
+          newPath,
+          parentDirInfo,
+          replace
+        );
+      }
+
+      // Directory entry
+      await doCopyDirectory(
+        oldEntryInfo,
+        destHandle,
+        newPath,
+        parentDirInfo,
+        replace
+      );
+    } catch {
+      throw new Error(`Unable to copy ${oldEntryInfo.kind} to ${destination}`);
+    } finally {
+      pauseFileWatcherRef.current = false;
+    }
+  };
+
+  const doCopyFile = async (
+    fileInfo: FileInfo,
+    destination: FileSystemDirectoryHandle,
+    newPath: string,
+    parentDir: DirectoryInfo,
+    replace: boolean
+  ) => {
+    const file = await fileInfo.handle.getFile();
+    const content = await file.text();
+    const newFileHandle = await destination.getFileHandle(fileInfo.name, {
+      create: true,
+    });
+    const writable = await newFileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+
+    const newFile = await newFileHandle.getFile();
+    const newFileInfo: FileInfo = {
+      handle: newFileHandle,
+      name: newFile.name,
+      lastModified: newFile.lastModified,
+      size: newFile.size,
+      type: newFile.type,
+      kind: "file",
+      path: newPath,
+      content: content,
+      opened: false,
+    };
+
+    if (replace) {
+      await parentDir.handle.removeEntry(fileInfo.name);
+      filesRef.current.delete(fileInfo.path);
+      previousFilesRef.current.delete(fileInfo.path);
+      if (fileInfo.opened) fileCacheRef.current.delete(fileInfo.path);
+    }
+
+    filesRef.current.set(newFileInfo.path, newFileInfo);
+    previousFilesRef.current.set(newFileInfo.path, newFileInfo);
+
+    setFiles(new Map(filesRef.current));
+    return;
+  };
+
+  const doCopyDirectory = async (
+    dirInfo: DirectoryInfo,
+    destination: FileSystemDirectoryHandle,
+    newPath: string,
+    parentDir: DirectoryInfo,
+    replace: boolean
+  ) => {
+    const newFilesMap: FileSystemFiles = new Map(filesRef.current);
+    const newWatchedDirectories: Map<string, DirectoryNode> = new Map(
+      watchedDirectoriesRef.current
+    );
+    const newDirHandle = await destination.getDirectoryHandle(dirInfo.name, {
+      create: true,
+    });
+
+    const newDirInfo: DirectoryInfo = {
+      handle: newDirHandle,
+      name: newDirHandle.name,
+      path: newPath,
+      kind: "directory",
+      loaded: dirInfo.loaded,
+    };
+
+    newFilesMap.set(newDirInfo.path, newDirInfo);
+    if (newDirInfo.loaded)
+      newWatchedDirectories.set(newDirInfo.path, { handle: newDirHandle });
+
+    await updateDirectoryContents(
+      dirInfo.handle,
+      newDirHandle,
+      newFilesMap,
+      newWatchedDirectories,
+      dirInfo.path,
+      newPath,
+      replace
+    );
+
+    if (replace) {
+      await parentDir.handle.removeEntry(dirInfo.name, {
+        recursive: true,
+      });
+      filesRef.current.delete(dirInfo.path);
+      previousFilesRef.current.delete(dirInfo.path);
+      if (dirInfo.loaded) watchedDirectoriesRef.current.delete(dirInfo.path);
+    }
+
+    filesRef.current = new Map(newFilesMap);
+    previousFilesRef.current = new Map(newFilesMap);
+    watchedDirectoriesRef.current = new Map(newWatchedDirectories);
+    setFiles(new Map(filesRef.current));
   };
 
   //#region Shared functions
@@ -702,7 +836,8 @@ export default function useFileSystemAccess(
     filesMap: FileSystemFiles,
     watchedDirectories: Map<string, DirectoryNode>,
     oldBasePath: string,
-    newBasePath: string
+    newBasePath: string,
+    replace: boolean = true
   ): Promise<void> => {
     for await (const [name, handle] of src.entries()) {
       const oldPath = `${oldBasePath}/${name}`;
@@ -731,8 +866,11 @@ export default function useFileSystemAccess(
           content: oldFileInfo.opened ? content : undefined,
         };
 
-        filesMap.delete(oldPath);
-        fileCacheRef.current.delete(oldPath);
+        if (replace) {
+          filesMap.delete(oldPath);
+          fileCacheRef.current.delete(oldPath);
+        }
+
         filesMap.set(newPath, newFileInfo);
       } else if (handle.kind === "directory") {
         const newDirHandle = await dest.getDirectoryHandle(name, {
@@ -749,11 +887,13 @@ export default function useFileSystemAccess(
             loaded: oldDirInfo.loaded,
           };
 
-          filesMap.delete(oldPath);
-          filesMap.set(newPath, newDirInfo);
+          if (replace) {
+            filesMap.delete(oldPath);
+            filesMap.set(newPath, newDirInfo);
+            if (oldDirInfo.loaded) watchedDirectories.delete(oldDirInfo.path);
+          }
 
           if (oldDirInfo.loaded) {
-            watchedDirectories.delete(oldDirInfo.path);
             watchedDirectories.set(newPath, { handle: newDirHandle });
           }
         }
@@ -1130,9 +1270,9 @@ export default function useFileSystemAccess(
     writeFile,
     createDirectory,
     deleteFile,
-    deleteDirectory,
     renameFile,
     renameDirectory,
+    copyFile,
   };
 }
 
