@@ -176,20 +176,6 @@ export default function useFileSystemAccess(
     }
   };
 
-  const openFile = async (path: string): Promise<FileInfo> => {
-    if (!path || typeof path !== "string")
-      throw new Error(`Invalid file path: ${path}`);
-
-    return await toggleFileOpened(path, true);
-  };
-
-  const closeFile = async (path: string): Promise<FileInfo> => {
-    if (!path || typeof path !== "string")
-      throw new Error(`Invalid file path: ${path}`);
-
-    return await toggleFileOpened(path, false);
-  };
-
   const writeFile = async (
     path: string,
     options: WriteFileOptions = {},
@@ -354,6 +340,60 @@ export default function useFileSystemAccess(
       pauseFileWatcherRef.current = false;
     }
   };
+
+  //#region OPEN/CLOSE FILE
+  const openFile = async (path: string): Promise<FileInfo> => {
+    if (!path || typeof path !== "string")
+      throw new Error(`Invalid file path: ${path}`);
+
+    return await toggleFileOpened(path, true);
+  };
+
+  const closeFile = async (path: string): Promise<FileInfo> => {
+    if (!path || typeof path !== "string")
+      throw new Error(`Invalid file path: ${path}`);
+
+    return await toggleFileOpened(path, false);
+  };
+
+  const toggleFileOpened = async (
+    path: string,
+    open: boolean
+  ): Promise<FileInfo> => {
+    const fileInfo = filesRef.current.get(path);
+    if (!fileInfo) throw new Error(`File not found: ${path}`);
+    if (fileInfo.kind != "file")
+      throw new Error(`Entry is not a file: ${path}`);
+
+    if (fileInfo.opened == true) return fileInfo;
+
+    const fileHandle = fileInfo.handle;
+    try {
+      if (open) {
+        const file = await fileHandle.getFile();
+        fileInfo.content = await file.text();
+        fileInfo.lastModified = file.lastModified;
+        fileInfo.size = file.size;
+        fileInfo.type = file.type;
+        fileInfo.name = file.name;
+        fileInfo.opened = true;
+      } else {
+        fileInfo.content = undefined;
+        if (fileInfo.opened) {
+          fileCacheRef.current.delete(fileInfo.path);
+          fileInfo.opened = false;
+        }
+      }
+
+      setFiles(new Map(filesRef.current));
+    } catch {
+      throw new Error(`Unable to ${open ? "open" : "close"} file: ${path}`);
+    }
+
+    return fileInfo;
+  };
+
+  //#endregion
 
   //#region RENAME FILE AND DIRECTORY
   const renameFile = async (
@@ -822,41 +862,6 @@ export default function useFileSystemAccess(
     await Promise.all(dirTasks);
   };
 
-  const toggleFileOpened = async (
-    path: string,
-    open: boolean
-  ): Promise<FileInfo> => {
-    const fileInfo = filesRef.current.get(path);
-    if (!fileInfo) throw new Error(`File not found: ${path}`);
-    if (fileInfo.kind != "file")
-      throw new Error(`Entry is not a file: ${path}`);
-
-    const fileHandle = fileInfo.handle;
-    try {
-      if (open) {
-        const file = await fileHandle.getFile();
-        fileInfo.content = await file.text();
-        fileInfo.lastModified = file.lastModified;
-        fileInfo.size = file.size;
-        fileInfo.type = file.type;
-        fileInfo.name = file.name;
-        fileInfo.opened = true;
-      } else {
-        fileInfo.content = undefined;
-        if (fileInfo.opened) {
-          fileCacheRef.current.delete(fileInfo.path);
-          fileInfo.opened = false;
-        }
-      }
-
-      setFiles(new Map(filesRef.current));
-    } catch {
-      throw new Error(`Unable to ${open ? "open" : "close"} file: ${path}`);
-    }
-
-    return fileInfo;
-  };
-
   const updateDirectoryContents = async (
     src: FileSystemDirectoryHandle,
     dest: FileSystemDirectoryHandle,
@@ -1296,6 +1301,10 @@ export default function useFileSystemAccess(
       filterTasks.push(
         (async () => {
           if (await ignoreFilePath(filters, path, node.handle)) {
+            filteredNodes.delete(path);
+            ignoredEntries.add(path);
+          }
+          if (node.kind == "file" && path.endsWith(".crswap")) {
             filteredNodes.delete(path);
             ignoredEntries.add(path);
           }
