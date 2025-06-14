@@ -365,7 +365,7 @@ export default function useFileSystemAccess(
     if (fileInfo.kind != "file")
       throw new Error(`Entry is not a file: ${path}`);
 
-    if (fileInfo.opened == true) return fileInfo;
+    if (open && fileInfo.opened == true) return fileInfo;
 
     const fileHandle = fileInfo.handle;
     try {

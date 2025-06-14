@@ -30,7 +30,7 @@ export const gitIgnoreFilter: FileFilterFn = async () => {
         handle.kind === "directory" &&
         (path.endsWith(".git") || path.endsWith(".git/"))
       ) {
-        return true;
+        return false;
       }
 
       const { ignored } = ig.test(path);
